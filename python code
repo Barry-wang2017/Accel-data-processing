@@ -1,0 +1,51 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import glob
+
+# Define the directory containing the CSV files
+data_dir = "your/data/directory/"  # Replace with your actual directory path
+
+# Get all CSV files in the directory
+csv_files = glob.glob(data_dir + "*.csv")
+
+# Define the column names for plotting (assuming same columns across files)
+x_col = "column_name_for_x_axis"  # Replace with your actual column name
+y_col = "column_name_for_y_axis"  # Replace with your actual column name
+
+# Define the desired start and end positions for the X-axis (replace with your values)
+start_pos = 10  # Adjust this value for the starting position on the X-axis
+end_pos = 20  # Adjust this value for the ending position on the X-axis
+
+# List to store labels for each plot
+plot_labels = []
+
+# Loop through each CSV file
+for file in csv_files:
+  # Read the CSV file into a DataFrame
+  df = pd.read_csv(file)
+  
+  # Extract data for plotting
+  x_data = df[x_col]
+  y_data = df[y_col]
+  
+  # Filter data within the desired X-axis range
+  filtered_x_data = x_data[ (x_data >= start_pos) & (x_data <= end_pos) ]
+  filtered_y_data = y_data[ (x_data >= start_pos) & (x_data <= end_pos) ]
+  
+  # Plot the filtered data (separate lines for each file)
+  plt.plot(filtered_x_data, filtered_y_data, label=file.split("/")[-1])  # Use filename as label
+  plot_labels.append(file.split("/")[-1])  # Extract filename for legend
+
+# Add labels and title for the plot  
+plt.xlabel(x_col)
+plt.ylabel(y_col)
+plt.title(f"Data from Multiple CSV Files (X-axis: {start_pos} to {end_pos})")
+
+# Adjust X-axis limits to match the filtered data range
+plt.xlim(start_pos, end_pos)  # Set X-axis limits explicitly
+
+# Add legend to differentiate between files
+plt.legend(plot_labels)
+
+# Display the plot
+plt.show()
