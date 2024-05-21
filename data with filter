@@ -9,9 +9,9 @@ data_dir = "your/data/directory/"  # Replace with your actual directory path
 # Get all CSV files in the directory
 csv_files = glob.glob(data_dir + "*.csv")
 
-# Define the column names for plotting (assuming same columns across files)
-time_col = "time_column_name"  # Replace with your actual time column name
-data_col = "data_column_name"  # Replace with your actual data column name
+# User-defined parameters (replace with your desired values)
+data_column_to_process = "data_column_name"  # Column containing the data to process
+raw_data_column = "raw_data_column_name"  # Optional column containing raw data (for filtering)
 
 # Define the desired start and end positions for the time axis (replace with your values)
 start_pos = 10  # Adjust this value for the starting position
@@ -33,38 +33,41 @@ for file in csv_files:
   # Read the CSV file into a DataFrame
   df = pd.read_csv(file)
   
-  # Extract data for plotting and filtering
-  time_data = df[time_col]
-  data_to_filter = df[data_col]
+  # Extract data for processing and filtering (based on user-defined columns)
+  data_to_process = df[data_column_to_process]
   
-  # Filter data within the desired time range
-  filtered_time_data = time_data[ (time_data >= start_pos) & (time_data <= end_pos) ]
-  data_to_filter = data_to_filter[ (time_data >= start_pos) & (time_data <= end_pos) ]
-  
-  # Convert time data to numpy array for frequency domain operations
-  time_data_np = np.asarray(filtered_time_data)
-  data_to_filter_np = np.asarray(data_to_filter)
+  # Optional: Extract raw data for filtering (if applicable)
+  if raw_data_column:
+    raw_data_to_filter = df[raw_data_column]
+  else:
+    raw_data_to_filter = data_to_process  # Use the same data for filtering if no raw data column
 
-  # Design a band-pass filter (adjust for low-pass or high-pass as needed)
-  nyq_freq = 0.5 * sample_rate  # Nyquist frequency
-  lowcut = lower_cutoff / nyq_freq
-  highcut = higher_cutoff / nyq_freq if higher_cutoff else None  # None for low-pass
-  b, a = butter(2, [lowcut, highcut], btype='band')
+  # Filter data within the desired time range
+  filtered_time_data = df[time_col][ (df[time_col] >= start_pos) & (df[time_col] <= end_pos) ]
+  data_to_process = data_to_process[ (df[time_col] >= start_pos) & (df[time_col] <= end_pos) ]
+  raw_data_to_filter = raw_data_to_filter[ (df[time_col] >= start_pos) & (df[time_col] <= end_pos) ]
   
-  # Apply the filter to the data
-  filtered_data = filtfilt(b, a, data_to_filter_np)
+  # Convert time data to numpy array for frequency domain operations (if filtering is used)
+  if raw_data_column:
+    time_data_np = np.asarray(filtered_time_data)
+    raw_data_to_filter_np = np.asarray(raw_data_to_filter)
   
-  # Plot the filtered data (separate lines for each file)
+    # Design a band-pass filter (adjust for low-pass or high-pass as needed)
+    nyq_freq = 0.5 * sample_rate  # Nyquist frequency
+    lowcut = lower_cutoff / nyq_freq
+    highcut = higher_cutoff / nyq_freq if higher_cutoff else None  # None for low-pass
+    b, a = butter(2, [lowcut, highcut], btype='band')
+  
+    # Apply the filter to the data
+    filtered_data = filtfilt(b, a, raw_data_to_filter_np)
+  else:
+    filtered_data = data_to_process  # No filtering if no raw data column
+
+  # Plot the processed data (separate lines for each file)
   plt.plot(filtered_time_data, filtered_data, label=file.split("/")[-1])  # Use filename as label
   plot_labels.append(file.split("/")[-1])  # Extract filename for legend
 
 # Add labels and title for the plot 
 plt.xlabel(time_col)
-plt.ylabel(data_col)
-plt.title(f"Filtered Data from Multiple CSV Files (Time: {start_pos} to {end_pos})")
-
-# Add legend to differentiate between files
-plt.legend(plot_labels)
-
-# Display the plot
-plt.show()
+plt.ylabel(data_column_to_process)  # Use the processing column name for Y-axis label
+plt.title(f"Processed Data from Multiple CSV Files (Time:
