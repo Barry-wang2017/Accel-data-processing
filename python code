@@ -16,6 +16,12 @@ y_col = "column_name_for_y_axis"  # Replace with your actual column name
 start_pos = 10  # Adjust this value for the starting position on the X-axis
 end_pos = 20  # Adjust this value for the ending position on the X-axis
 
+# Define unit multipliers and labels for X and Y axes (adjust as needed)
+x_unit_multiplier = 1  # Multiply by 1 to keep original units
+x_unit_label = "Seconds"  # Label for X-axis units
+y_unit_multiplier = 1000  # Multiply by 1000 (e.g., convert milliseconds to seconds)
+y_unit_label = "Meters (m)"  # Label for Y-axis units
+
 # List to store labels for each plot
 plot_labels = []
 
@@ -32,20 +38,28 @@ for file in csv_files:
   filtered_x_data = x_data[ (x_data >= start_pos) & (x_data <= end_pos) ]
   filtered_y_data = y_data[ (x_data >= start_pos) & (x_data <= end_pos) ]
   
+  # Apply unit conversion (multiply by respective factors)
+  filtered_x_data = filtered_x_data * x_unit_multiplier
+  filtered_y_data = filtered_y_data * y_unit_multiplier
+  
   # Plot the filtered data (separate lines for each file)
   plt.plot(filtered_x_data, filtered_y_data, label=file.split("/")[-1])  # Use filename as label
   plot_labels.append(file.split("/")[-1])  # Extract filename for legend
 
-# Add labels and title for the plot  
-plt.xlabel(x_col)
-plt.ylabel(y_col)
+# Add labels and title for the plot with unit annotations
+plt.xlabel(f"{x_col} ({x_unit_label})")
+plt.ylabel(f"{y_col} ({y_unit_label})")
 plt.title(f"Data from Multiple CSV Files (X-axis: {start_pos} to {end_pos})")
 
 # Adjust X-axis limits to match the filtered data range
-plt.xlim(start_pos, end_pos)  # Set X-axis limits explicitly
+plt.xlim(start_pos * x_unit_multiplier, end_pos * x_unit_multiplier)  # Apply unit conversion for limits
 
 # Add legend to differentiate between files
 plt.legend(plot_labels)
+
+# Mark the scale (ticks) on the X and Y axes
+plt.xticks(rotation=45)  # Rotate X-axis labels for better readability
+plt.yticks()  # Add Y-axis ticks automatically (customize interval if needed)
 
 # Display the plot
 plt.show()
