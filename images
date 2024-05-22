@@ -1,0 +1,71 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+
+def process_and_save_plot(filename, folder_path, x_col, y_col, start_time=None, end_time=None, x_unit="default", y_unit="default"):
+  """
+  Processes a single CSV file, plots the data, and saves the plot as an image.
+
+  Args:
+      filename (str): Name of the CSV file.
+      folder_path (str): Path to the folder containing the CSV file.
+      x_col (str): Name of the column for the X-axis.
+      y_col (str): Name of the column for the Y-axis.
+      start_time (float, optional): Start time for the X-axis. Defaults to None (plots all data from the beginning).
+      end_time (float, optional): End time for the X-axis. Defaults to None (plots all data until the end).
+      x_unit (str, optional): Unit label for the X-axis. Defaults to "default".
+      y_unit (str, optional): Unit label for the Y-axis. Defaults to "default".
+  """
+  colors = 'b'  # Use a single color for each separate plot
+
+  # Read the CSV data
+  data = pd.read_csv(os.path.join(folder_path, filename))
+
+  # Select data based on start and end time
+  if start_time and end_time:
+    data = data[(data[x_col] >= start_time) & (data[x_col] <= end_time)]
+  elif start_time:
+    data = data[data[x_col] >= start_time]
+  elif end_time:
+    data = data[data[x_col] <= end_time]
+
+  # Create the plot
+  fig, ax = plt.subplots()
+  ax.plot(data[x_col], data[y_col], label=filename, color=colors)
+
+  # Find and mark max and min values (assuming data remains within selected range)
+  max_val = data[y_col].max()
+  min_val = data[y_col].min()
+  ax.scatter(data[x_col][data[y_col] == max_val], max_val, marker='o', c='red', label=f'Max: {max_val:.2f} {y_unit}')
+  ax.scatter(data[x_col][data[y_col] == min_val], min_val, marker='o', c='blue', label=f'Min: {min_val:.2f} {y_unit}')
+
+  # Set axis labels and scales
+  ax.set_xlabel(f"{x_col} ({x_unit})")
+  ax.set_ylabel(f"{y_col} ({y_unit})")
+
+  # Set X-axis limits based on start and end time (or use all data if not provided)
+  if start_time and end_time:
+    ax.set_xlim(start_time, end_time)
+  else:
+    # Consider using data.iloc[0][x_col] and data.iloc[-1][x_col] for minimum and maximum values from all data
+
+  # Add legend and title
+  ax.legend()
+  plt.title(f"{filename} Plot")
+
+  # Save the plot as an image (replace 'png' with your preferred format)
+  image_path = os.path.join(folder_path, f"{filename[:-4]}.png")  # Remove '.csv' extension and add '.png'
+  plt.savefig(image_path)
+
+  # Close the plot to avoid memory issues with many files
+  plt.close(fig)
+
+def process_all_csv_files(folder_path, x_col, y_col, start_time=None, end_time=None, x_unit="default", y_unit="default"):
+  """
+  Processes all CSV files in a folder and saves separate plots as images.
+
+  Args:
+      folder_path (str): Path to the folder containing CSV files.
+      x_col (str): Name of the column for the X-axis.
+      y_col (str): Name of the column for the Y-axis.
+      start_time (float, optional): Start time for the X-axis. Defaults to None (
