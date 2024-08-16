@@ -1,73 +1,205 @@
-import pandas as pd
+import os
+import csv
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.signal import butter, filtfilt  # For filtering (requires SciPy)
+import warnings
 
-# Define the directory containing the CSV files
-data_dir = "your/data/directory/"  # Replace with your actual directory path
+def low_pass_filter(data, alpha):
+    """
+    Apply a first-order low-pass filter to the data.
+    
+    :param data: Input data (numpy array)
+    :param alpha: Filter coefficient (0 < alpha < 1). Lower values create a stronger filtering effect.
+    :return: Filtered data
+    """
+    filtered_data = np.zeros_like(data)
+    filtered_data[0] = data[0]
+    for i in range(1, len(data)):
+        filtered_data[i] = alpha * data[i] + (1 - alpha) * filtered_data[i-1]
+    return filtered_data
 
-# Get all CSV files in the directory
-csv_files = glob.glob(data_dir + "*.csv")
+def save_processed_data(folder_path, processed_data, x_col, y_cols, x_unit_label, y_unit_label):
+    output_filename = 'processed_acceleration_data.csv'
+    output_path = os.path.join(folder_path, output_filename)
+    
+    with open(output_path, 'w', newline='') as csvfile:
+        csvwriter = csv.writer(csvfile)
+        
+        # Write header
+        header = [f'X{x_col} {x_unit_label}'] + [f'Y{col} {y_unit_label}' for col in y_cols]
+        csvwriter.writerow(header)
+        
+        # Write data
+        for file_data in processed_data:
+            csvwriter.writerow([file_data['file']])  # Write filename as a row
+            for row in file_data['data']:
+                csvwriter.writerow(row)
+            csvwriter.writerow([])  # Empty row between files
+    
+    print(f"Processed data saved as: {output_path}")
 
-# User-defined parameters (replace with your desired values)
-data_column_to_process = "data_column_name"  # Column containing the data to process
-raw_data_column = "raw_data_column_name"  # Optional column containing raw data (for filtering)
+def process_acceleration_data(
+    folder_path, start_row, start_col, x_col, y_cols, 
+    colors=None, line_width=2, font_size=12, figsize=(12, 8), dpi=100,
+    x_range=None, y_range=None, 
+    marker_font_size=10, marker_font_weight='normal',
+    curve_labels=None, output_filename='acceleration_plot.png',
+    x_unit_convert=1, y_unit_convert=1,
+    x_unit_label='', y_unit_label='',
+    apply_filter=False, filter_alpha=0.1
+):
+    # Get all CSV files in the folder
+    csv_files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
+    
+    plt.figure(figsize=figsize, dpi=dpi)
+    plt.rcParams.update({'font.size': font_size})
+    
+    processed_data = []
+    
+    for i, file in enumerate(csv_files):
+        file_path = os.path.join(folder_path, file)
+        
+        with open(file_path, 'r') as csvfile:
+            csvreader = csv.reader(csvfile)
+            
+            # Skip rows until start_row
+            for _ in range(start_row):
+                next(csvreader)
+            
+            data = []
+            for row_index, row in enumerate(csvreader, start=start_row):
+                try:
+                    # Start from start_col and convert to float, skipping empty cells
+                    processed_row = [float(value) if value.strip() else np.nan for value in row[start_col:]]
+                    if any(np.isnan(processed_row)):
+                        warnings.warn(f"Empty cell(s) found in file {file}, row {row_index + 1}. Replacing with NaN.")
+                    data.append(processed_row)
+                except ValueError as e:
+                    warnings.warn(f"Error processing row {row_index + 1} in file {file}: {e}")
+                    continue
+        
+        if not data:
+            warnings.warn(f"No valid data found in file {file}. Skipping this file.")
+            continue
 
-# Define the desired start and end positions for the time axis (replace with your values)
-start_pos = 10  # Adjust this value for the starting position
-end_pos = 20  # Adjust this value for the ending position
+        data = np.array(data)
+        x = data[:, x_col - start_col] * x_unit_convert
+        
+        file_data = {'file': file, 'data': []}
+        
+        for j, y_col in enumerate(y_cols):
+            y = data[:, y_col - start_col] * y_unit_convert
+            
+            # Remove NaN values
+            mask = ~np.isnan(x) & ~np.isnan(y)
+            x_clean = x[mask]
+            y_clean = y[mask]
+            
+            if len(x_clean) == 0:
+                warnings.warn(f"No valid data for column {y_col} in file {file}. Skipping this column.")
+                continue
 
-# Define filtering parameters (adjust as needed)
-# - lower_cutoff: Minimum frequency to keep (in Hz)
-# - higher_cutoff: Maximum frequency to keep (in Hz)
-# - sample_rate: Sampling rate of the data (in Hz) - crucial for frequency conversion
-lower_cutoff = 2  # Adjust this value for low-pass filtering
-higher_cutoff = 10  # Adjust this value for high-pass filtering (or None for low-pass)
-sample_rate = 100  # Adjust this value for your data's sampling rate
+            # Apply low-pass filter if requested
+            if apply_filter:
+                y_clean = low_pass_filter(y_clean, filter_alpha)
 
-# List to store labels for each plot
-plot_labels = []
+            # Store processed data
+            file_data['data'].extend(zip(x_clean, y_clean))
 
-# Loop through each CSV file
-for file in csv_files:
-  # Read the CSV file into a DataFrame
-  df = pd.read_csv(file)
-  
-  # Extract data for processing and filtering (based on user-defined columns)
-  data_to_process = df[data_column_to_process]
-  
-  # Optional: Extract raw data for filtering (if applicable)
-  if raw_data_column:
-    raw_data_to_filter = df[raw_data_column]
-  else:
-    raw_data_to_filter = data_to_process  # Use the same data for filtering if no raw data column
+            color = colors[i * len(y_cols) + j] if colors else None
+            label = curve_labels[i * len(y_cols) + j] if curve_labels else f'{file} - Column {y_col}'
+            
+            plt.plot(x_clean, y_clean, label=label, color=color, linewidth=line_width)
+            
+            # Find and mark max and min values
+            max_idx = np.argmax(y_clean)
+            min_idx = np.argmin(y_clean)
+            
+            plt.plot(x_clean[max_idx], y_clean[max_idx], 'ro')
+            plt.text(x_clean[max_idx], y_clean[max_idx], f'Max: {y_clean[max_idx]:.2f}', 
+                     fontsize=marker_font_size, fontweight=marker_font_weight,
+                     verticalalignment='bottom')
+            
+            plt.plot(x_clean[min_idx], y_clean[min_idx], 'bo')
+            plt.text(x_clean[min_idx], y_clean[min_idx], f'Min: {y_clean[min_idx]:.2f}', 
+                     fontsize=marker_font_size, fontweight=marker_font_weight,
+                     verticalalignment='top')
+        
+        processed_data.append(file_data)
+    
+    plt.xlabel(f'Column {x_col} {x_unit_label}')
+    plt.ylabel(f'Acceleration {y_unit_label}')
+    title = 'Acceleration Data from Multiple CSV Files'
+    if apply_filter:
+        title += f' (Low-pass filter applied, alpha={filter_alpha})'
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    
+    # Set X-axis range if provided
+    if x_range:
+        plt.xlim(x_range)
+    
+    # Set Y-axis range if provided
+    if y_range:
+        plt.ylim(y_range)
+    
+    plt.tight_layout()
+    
+    # Save the plot as an image file
+    output_path = os.path.join(folder_path, output_filename)
+    plt.savefig(output_path, dpi=dpi)
+    print(f"Plot saved as: {output_path}")
+    
+    plt.show()
+    
+    # Save processed data to CSV
+    save_processed_data(folder_path, processed_data, x_col, y_cols, x_unit_label, y_unit_label)
 
-  # Filter data within the desired time range
-  filtered_time_data = df[time_col][ (df[time_col] >= start_pos) & (df[time_col] <= end_pos) ]
-  data_to_process = data_to_process[ (df[time_col] >= start_pos) & (df[time_col] <= end_pos) ]
-  raw_data_to_filter = raw_data_to_filter[ (df[time_col] >= start_pos) & (df[time_col] <= end_pos) ]
-  
-  # Convert time data to numpy array for frequency domain operations (if filtering is used)
-  if raw_data_column:
-    time_data_np = np.asarray(filtered_time_data)
-    raw_data_to_filter_np = np.asarray(raw_data_to_filter)
-  
-    # Design a band-pass filter (adjust for low-pass or high-pass as needed)
-    nyq_freq = 0.5 * sample_rate  # Nyquist frequency
-    lowcut = lower_cutoff / nyq_freq
-    highcut = higher_cutoff / nyq_freq if higher_cutoff else None  # None for low-pass
-    b, a = butter(2, [lowcut, highcut], btype='band')
-  
-    # Apply the filter to the data
-    filtered_data = filtfilt(b, a, raw_data_to_filter_np)
-  else:
-    filtered_data = data_to_process  # No filtering if no raw data column
+# Example usage
+folder_path = '/Users/barrywang/Documents/Python_work/iPad/Sovin_0801/Raw/Raw data'
+start_row = 10
+start_col = 0
+x_col = 0
+y_cols = [6]
 
-  # Plot the processed data (separate lines for each file)
-  plt.plot(filtered_time_data, filtered_data, label=file.split("/")[-1])  # Use filename as label
-  plot_labels.append(file.split("/")[-1])  # Extract filename for legend
 
-# Add labels and title for the plot 
-plt.xlabel(time_col)
-plt.ylabel(data_column_to_process)  # Use the processing column name for Y-axis label
-plt.title(f"Processed Data from Multiple CSV Files (Time:
+custom_colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan']
+line_width = 2
+font_size = 14
+figsize = (16, 10)
+dpi = 150
+
+x_axis_range = (19.7, 21)
+y_axis_range = (-10000, 20000)
+
+marker_font_size = 8
+marker_font_weight = 'bold'
+
+curve_labels = ['R1A_drop1', 'R1A_drop2', 'R1A_drop3', 'R4A_drop1', 'R4A_drop2', 'R4A_drop3']
+
+output_filename = 'acceleration_plot.png'
+
+# Unit conversion factors
+x_unit_convert = 1000  # Example: 1 for no conversion, 0.001 for m to km, 1000 for m to mm
+y_unit_convert = 1  # Example: 1 for no conversion, 9.81 for g to m/s^2
+
+# Unit labels
+x_unit_label = '(s)'  # Example: '(s)' for seconds, '(ms)' for milliseconds
+y_unit_label = '(m/s^2)'  # Example: '(m/s^2)' for meters per second squared, '(g)' for g-force
+
+# Low-pass filter settings
+apply_filter = True  # Set to True to apply the filter, False to skip filtering
+filter_alpha = 0.5  # Adjust this value to change the filter strength (0 < alpha < 1)
+
+process_acceleration_data(
+    folder_path, start_row, start_col, x_col, y_cols, 
+    colors=custom_colors, line_width=line_width, font_size=font_size, 
+    figsize=figsize, dpi=dpi,
+    x_range=x_axis_range, y_range=y_axis_range,
+    marker_font_size=marker_font_size, marker_font_weight=marker_font_weight,
+    curve_labels=curve_labels, output_filename=output_filename,
+    x_unit_convert=x_unit_convert, y_unit_convert=y_unit_convert,
+    x_unit_label=x_unit_label, y_unit_label=y_unit_label,
+    apply_filter=apply_filter, filter_alpha=filter_alpha
+)
