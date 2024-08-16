@@ -1,65 +1,134 @@
-import pandas as pd
+import os
+import csv
 import matplotlib.pyplot as plt
-import glob
+import numpy as np
+import warnings
 
-# Define the directory containing the CSV files
-data_dir = "your/data/directory/"  # Replace with your actual directory path
+def process_acceleration_data(
+    folder_path, start_row, start_col, x_col, y_cols, 
+    colors=None, line_width=2, font_size=12, figsize=(12, 8), dpi=100,
+    x_range=None, y_range=None, 
+    marker_font_size=10, marker_font_weight='normal',
+    curve_labels=None, output_filename='acceleration_plot.png'
+):
+    # Get all CSV files in the folder
+    csv_files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
+    
+    plt.figure(figsize=figsize, dpi=dpi)
+    plt.rcParams.update({'font.size': font_size})
+    
+    for i, file in enumerate(csv_files):
+        file_path = os.path.join(folder_path, file)
+        
+        with open(file_path, 'r') as csvfile:
+            csvreader = csv.reader(csvfile)
+            
+            # Skip rows until start_row
+            for _ in range(start_row):
+                next(csvreader)
+            
+            data = []
+            for row_index, row in enumerate(csvreader, start=start_row):
+                try:
+                    # Start from start_col and convert to float, skipping empty cells
+                    processed_row = [float(value) if value.strip() else np.nan for value in row[start_col:]]
+                    if any(np.isnan(processed_row)):
+                        warnings.warn(f"Empty cell(s) found in file {file}, row {row_index + 1}. Replacing with NaN.")
+                    data.append(processed_row)
+                except ValueError as e:
+                    warnings.warn(f"Error processing row {row_index + 1} in file {file}: {e}")
+                    continue
+        
+        if not data:
+            warnings.warn(f"No valid data found in file {file}. Skipping this file.")
+            continue
 
-# Get all CSV files in the directory
-csv_files = glob.glob(data_dir + "*.csv")
+        data = np.array(data)
+        x = data[:, x_col - start_col]
+        
+        for j, y_col in enumerate(y_cols):
+            y = data[:, y_col - start_col]
+            
+            # Remove NaN values
+            mask = ~np.isnan(x) & ~np.isnan(y)
+            x_clean = x[mask]
+            y_clean = y[mask]
+            
+            if len(x_clean) == 0:
+                warnings.warn(f"No valid data for column {y_col} in file {file}. Skipping this column.")
+                continue
 
-# Define the column names for plotting (assuming same columns across files)
-x_col = "column_name_for_x_axis"  # Replace with your actual column name
-y_col = "column_name_for_y_axis"  # Replace with your actual column name
+            color = colors[i * len(y_cols) + j] if colors else None
+            label = curve_labels[i * len(y_cols) + j] if curve_labels else f'{file} - Column {y_col}'
+            
+            plt.plot(x_clean, y_clean, label=label, color=color, linewidth=line_width)
+            
+            # Find and mark max and min values
+            max_idx = np.argmax(y_clean)
+            min_idx = np.argmin(y_clean)
+            
+            plt.plot(x_clean[max_idx], y_clean[max_idx], 'ro')
+            plt.text(x_clean[max_idx], y_clean[max_idx], f'Max: {y_clean[max_idx]:.2f}', 
+                     fontsize=marker_font_size, fontweight=marker_font_weight,
+                     verticalalignment='bottom')
+            
+            plt.plot(x_clean[min_idx], y_clean[min_idx], 'bo')
+            plt.text(x_clean[min_idx], y_clean[min_idx], f'Min: {y_clean[min_idx]:.2f}', 
+                     fontsize=marker_font_size, fontweight=marker_font_weight,
+                     verticalalignment='top')
+    
+    plt.xlabel(f'Time(sec)')
+    plt.ylabel('Acceleration(g)')
+    plt.title('Acceleration_Sensor2_Z')
+    plt.legend()
+    plt.grid(True)
+    
+    # Set X-axis range if provided
+    if x_range:
+        plt.xlim(x_range)
+    
+    # Set Y-axis range if provided
+    if y_range:
+        plt.ylim(y_range)
+    
+    plt.tight_layout()
+    
+    # Save the plot as an image file
+    output_path = os.path.join(folder_path, output_filename)
+    plt.savefig(output_path, dpi=dpi)
+    print(f"Plot saved as: {output_path}")
+    
+    plt.show()
 
-# Define the desired start and end positions for the X-axis (replace with your values)
-start_pos = 10  # Adjust this value for the starting position on the X-axis
-end_pos = 20  # Adjust this value for the ending position on the X-axis
+# Example usage remains the same as before
+folder_path = '/Users/barrywang/Documents/Python_work/iphone/V53/V53/20C'
+start_row = 2
+start_col = 2
+x_col = 2
+y_cols = [3]
 
-# Define unit multipliers and labels for X and Y axes (adjust as needed)
-x_unit_multiplier = 1  # Multiply by 1 to keep original units
-x_unit_label = "Seconds"  # Label for X-axis units
-y_unit_multiplier = 1000  # Multiply by 1000 (e.g., convert milliseconds to seconds)
-y_unit_label = "Meters (m)"  # Label for Y-axis units
 
-# List to store labels for each plot
-plot_labels = []
+custom_colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan']
+line_width = 2
+font_size = 14
+figsize = (16, 10)
+dpi = 150
 
-# Loop through each CSV file
-for file in csv_files:
-  # Read the CSV file into a DataFrame
-  df = pd.read_csv(file)
-  
-  # Extract data for plotting
-  x_data = df[x_col]
-  y_data = df[y_col]
-  
-  # Filter data within the desired X-axis range
-  filtered_x_data = x_data[ (x_data >= start_pos) & (x_data <= end_pos) ]
-  filtered_y_data = y_data[ (x_data >= start_pos) & (x_data <= end_pos) ]
-  
-  # Apply unit conversion (multiply by respective factors)
-  filtered_x_data = filtered_x_data * x_unit_multiplier
-  filtered_y_data = filtered_y_data * y_unit_multiplier
-  
-  # Plot the filtered data (separate lines for each file)
-  plt.plot(filtered_x_data, filtered_y_data, label=file.split("/")[-1])  # Use filename as label
-  plot_labels.append(file.split("/")[-1])  # Extract filename for legend
+x_axis_range = (0.009, 0.012)
+y_axis_range = (-1000, 10000)
 
-# Add labels and title for the plot with unit annotations
-plt.xlabel(f"{x_col} ({x_unit_label})")
-plt.ylabel(f"{y_col} ({y_unit_label})")
-plt.title(f"Data from Multiple CSV Files (X-axis: {start_pos} to {end_pos})")
+marker_font_size = 6
+marker_font_weight = 'bold'
 
-# Adjust X-axis limits to match the filtered data range
-plt.xlim(start_pos * x_unit_multiplier, end_pos * x_unit_multiplier)  # Apply unit conversion for limits
+curve_labels = ['config1', 'config2', 'config3', 'config4', 'config5', 'config6']
 
-# Add legend to differentiate between files
-plt.legend(plot_labels)
+output_filename = 'Force_plot.png'
 
-# Mark the scale (ticks) on the X and Y axes
-plt.xticks(rotation=45)  # Rotate X-axis labels for better readability
-plt.yticks()  # Add Y-axis ticks automatically (customize interval if needed)
-
-# Display the plot
-plt.show()
+process_acceleration_data(
+    folder_path, start_row, start_col, x_col, y_cols, 
+    colors=custom_colors, line_width=line_width, font_size=font_size, 
+    figsize=figsize, dpi=dpi,
+    x_range=x_axis_range, y_range=y_axis_range,
+    marker_font_size=marker_font_size, marker_font_weight=marker_font_weight,
+    curve_labels=curve_labels, output_filename=output_filename
+)
