@@ -3,20 +3,32 @@ import csv
 import matplotlib.pyplot as plt
 import numpy as np
 import warnings
+from scipy import signal
 
-def low_pass_filter(data, alpha):
+def design_lowpass_filter(cutoff_freq, fs, order, stopband_attenuation):
     """
-    Apply a first-order low-pass filter to the data.
+    Design a Butterworth low-pass filter.
+    
+    :param cutoff_freq: Cutoff frequency in Hz
+    :param fs: Sampling frequency in Hz
+    :param order: Filter order (affects steepness)
+    :param stopband_attenuation: Desired stopband attenuation in dB
+    :return: b, a coefficients of the filter
+    """
+    nyquist_freq = 0.5 * fs
+    normal_cutoff = cutoff_freq / nyquist_freq
+    b, a = signal.butter(order, normal_cutoff, btype='low', analog=False)
+    return b, a
+
+def apply_lowpass_filter(data, b, a):
+    """
+    Apply a low-pass filter to the data.
     
     :param data: Input data (numpy array)
-    :param alpha: Filter coefficient (0 < alpha < 1). Lower values create a stronger filtering effect.
+    :param b, a: Filter coefficients
     :return: Filtered data
     """
-    filtered_data = np.zeros_like(data)
-    filtered_data[0] = data[0]
-    for i in range(1, len(data)):
-        filtered_data[i] = alpha * data[i] + (1 - alpha) * filtered_data[i-1]
-    return filtered_data
+    return signal.filtfilt(b, a, data)
 
 def save_processed_data(folder_path, processed_data, x_col, y_cols, x_unit_label, y_unit_label):
     output_filename = 'processed_acceleration_data.csv'
@@ -38,6 +50,7 @@ def save_processed_data(folder_path, processed_data, x_col, y_cols, x_unit_label
     
     print(f"Processed data saved as: {output_path}")
 
+
 def process_acceleration_data(
     folder_path, start_row, start_col, x_col, y_cols, 
     colors=None, line_width=2, font_size=12, figsize=(12, 8), dpi=100,
@@ -46,12 +59,31 @@ def process_acceleration_data(
     curve_labels=None, output_filename='acceleration_plot.png',
     x_unit_convert=1, y_unit_convert=1,
     x_unit_label='', y_unit_label='',
-    apply_filter=False, filter_alpha=0.1
+    apply_filter=False, cutoff_freq=10, filter_order=4, stopband_attenuation=40,
+    max_width=32767  # New parameter to limit the maximum width of the plot
 ):
     # Get all CSV files in the folder
     csv_files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
     
-    plt.figure(figsize=figsize, dpi=dpi)
+    # Calculate the required width based on the data
+    max_x = 0
+    for file in csv_files:
+        file_path = os.path.join(folder_path, file)
+        with open(file_path, 'r') as csvfile:
+            csvreader = csv.reader(csvfile)
+            for _ in range(start_row):
+                next(csvreader)
+            x_values = [float(row[x_col - start_col]) * x_unit_convert for row in csvreader if len(row) > x_col - start_col]
+            if x_values:
+                max_x = max(max_x, max(x_values))
+    
+    # Adjust figsize to maintain aspect ratio while limiting width
+    aspect_ratio = figsize[1] / figsize[0]
+    new_width = min(max_width / dpi, figsize[0])
+    new_height = new_width * aspect_ratio
+    adjusted_figsize = (new_width, new_height)
+    
+    plt.figure(figsize=adjusted_figsize, dpi=dpi)
     plt.rcParams.update({'font.size': font_size})
     
     processed_data = []
@@ -87,6 +119,12 @@ def process_acceleration_data(
         
         file_data = {'file': file, 'data': []}
         
+        # Calculate sampling frequency
+        fs = 1 / np.mean(np.diff(x))
+        
+        # Design the low-pass filter
+        b, a = design_lowpass_filter(cutoff_freq, fs, filter_order, stopband_attenuation)
+        
         for j, y_col in enumerate(y_cols):
             y = data[:, y_col - start_col] * y_unit_convert
             
@@ -99,29 +137,34 @@ def process_acceleration_data(
                 warnings.warn(f"No valid data for column {y_col} in file {file}. Skipping this column.")
                 continue
 
-            # Apply low-pass filter if requested
-            if apply_filter:
-                y_clean = low_pass_filter(y_clean, filter_alpha)
-
-            # Store processed data
-            file_data['data'].extend(zip(x_clean, y_clean))
-
             color = colors[i * len(y_cols) + j] if colors else None
             label = curve_labels[i * len(y_cols) + j] if curve_labels else f'{file} - Column {y_col}'
+
+
+            # Plot raw data as dotted line
+            #plt.plot(x_clean, y_clean, linestyle=':', color=color, linewidth=line_width, label=f'{label} (Raw)')
+
+            # Apply low-pass filter if requested
+            if apply_filter:
+                y_filtered = apply_lowpass_filter(y_clean, b, a)
+                plt.plot(x_clean, y_filtered, linestyle='-', color=color, linewidth=line_width, label=f'{label} (Filtered)')
+            else:
+                y_filtered = y_clean
+
+            # Store processed data
+            file_data['data'].extend(zip(x_clean, y_filtered))
+
+            # Find and mark max and min values on the filtered data
+            max_idx = np.argmax(y_filtered)
+            min_idx = np.argmin(y_filtered)
             
-            plt.plot(x_clean, y_clean, label=label, color=color, linewidth=line_width)
-            
-            # Find and mark max and min values
-            max_idx = np.argmax(y_clean)
-            min_idx = np.argmin(y_clean)
-            
-            plt.plot(x_clean[max_idx], y_clean[max_idx], 'ro')
-            plt.text(x_clean[max_idx], y_clean[max_idx], f'Max: {y_clean[max_idx]:.2f}', 
+            plt.plot(x_clean[max_idx], y_filtered[max_idx], 'ro')
+            plt.text(x_clean[max_idx], y_filtered[max_idx], f'Max: {y_filtered[max_idx]:.2f}', 
                      fontsize=marker_font_size, fontweight=marker_font_weight,
                      verticalalignment='bottom')
             
-            plt.plot(x_clean[min_idx], y_clean[min_idx], 'bo')
-            plt.text(x_clean[min_idx], y_clean[min_idx], f'Min: {y_clean[min_idx]:.2f}', 
+            plt.plot(x_clean[min_idx], y_filtered[min_idx], 'bo')
+            plt.text(x_clean[min_idx], y_filtered[min_idx], f'Min: {y_filtered[min_idx]:.2f}', 
                      fontsize=marker_font_size, fontweight=marker_font_weight,
                      verticalalignment='top')
         
@@ -131,7 +174,7 @@ def process_acceleration_data(
     plt.ylabel(f'Acceleration {y_unit_label}')
     title = 'Acceleration Data from Multiple CSV Files'
     if apply_filter:
-        title += f' (Low-pass filter applied, alpha={filter_alpha})'
+        title += f' (Low-pass filter applied, fc={cutoff_freq}Hz, order={filter_order})'
     plt.title(title)
     plt.legend()
     plt.grid(True)
@@ -151,46 +194,52 @@ def process_acceleration_data(
     plt.savefig(output_path, dpi=dpi)
     print(f"Plot saved as: {output_path}")
     
-    plt.show()
+    plt.close()  # Close the plot to free up memory
     
     # Save processed data to CSV
     save_processed_data(folder_path, processed_data, x_col, y_cols, x_unit_label, y_unit_label)
-
+    
+    # Example usage
 # Example usage
-folder_path = '/Users/barrywang/Documents/Python_work/iPad/Sovin_0801/Raw/Raw data'
+folder_path = '/Users/barrywang/Documents/Python_work/iPad/J481/WRxxx/Kirby P1 REL Rcam SFR Fail DOE O13 271TF099 12830/O13 Compare'
 start_row = 10
 start_col = 0
 x_col = 0
-y_cols = [6]
+y_cols = [1]
 
-
-custom_colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan']
+custom_colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan', 'black', 'pink', 'yellow', '#7442FF', '#5283FF']
 line_width = 2
 font_size = 14
 figsize = (16, 10)
 dpi = 150
 
-x_axis_range = (19.7, 21)
-y_axis_range = (-10000, 20000)
+x_axis_range = (0.00755, 0.0085)
+y_axis_range = (-30000, 15000)
 
-marker_font_size = 8
+marker_font_size = 4
 marker_font_weight = 'bold'
 
-curve_labels = ['R1A_drop1', 'R1A_drop2', 'R1A_drop3', 'R4A_drop1', 'R4A_drop2', 'R4A_drop3']
+curve_labels = []
 
-output_filename = 'acceleration_plot.png'
+output_filename = 'acceleration_plot_no filter.png'
 
 # Unit conversion factors
-x_unit_convert = 1000  # Example: 1 for no conversion, 0.001 for m to km, 1000 for m to mm
+x_unit_convert = 1  # Example: 1 for no conversion, 0.001 for m to km, 1000 for m to mm
 y_unit_convert = 1  # Example: 1 for no conversion, 9.81 for g to m/s^2
 
 # Unit labels
 x_unit_label = '(s)'  # Example: '(s)' for seconds, '(ms)' for milliseconds
 y_unit_label = '(m/s^2)'  # Example: '(m/s^2)' for meters per second squared, '(g)' for g-force
 
+
 # Low-pass filter settings
-apply_filter = True  # Set to True to apply the filter, False to skip filtering
-filter_alpha = 0.5  # Adjust this value to change the filter strength (0 < alpha < 1)
+apply_filter = False  # Set to True to apply the filter, False to skip filtering
+cutoff_freq = 10000  # Cutoff frequency in Hz
+filter_order = 4  # Filter order (affects steepness)
+stopband_attenuation = 60  # Desired stopband attenuation in dB
+
+# Maximum width of the plot in pixels
+max_width = 32767  # Adjust this value if needed, but keep it below 65535
 
 process_acceleration_data(
     folder_path, start_row, start_col, x_col, y_cols, 
@@ -201,5 +250,7 @@ process_acceleration_data(
     curve_labels=curve_labels, output_filename=output_filename,
     x_unit_convert=x_unit_convert, y_unit_convert=y_unit_convert,
     x_unit_label=x_unit_label, y_unit_label=y_unit_label,
-    apply_filter=apply_filter, filter_alpha=filter_alpha
+    apply_filter=apply_filter, cutoff_freq=cutoff_freq, 
+    filter_order=filter_order, stopband_attenuation=stopband_attenuation,
+    max_width=max_width
 )
